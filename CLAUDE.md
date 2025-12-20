@@ -388,7 +388,216 @@ cp config/config.example.toml config/config.toml
 # Edit config/config.toml with your API keys
 ```
 
+## Docker Usage
+
+Build and run with Docker:
+
+```bash
+# Build the image
+docker build -t openmanus .
+
+# Run interactively
+docker run -it --rm \
+  -v $(pwd)/config:/app/OpenManus/config \
+  -v $(pwd)/workspace:/app/OpenManus/workspace \
+  openmanus python main.py
+```
+
+The Dockerfile uses Python 3.12-slim and installs dependencies via `uv`.
+
+## CI/CD and GitHub Workflows
+
+The project uses several GitHub Actions workflows (`.github/workflows/`):
+
+| Workflow | Purpose |
+|----------|---------|
+| `pre-commit.yaml` | Runs pre-commit checks on PRs |
+| `build-package.yaml` | Builds the Python package |
+| `environment-corrupt-check.yaml` | Validates environment setup |
+| `pr-autodiff.yaml` | Auto-generates PR diffs |
+| `stale.yaml` | Manages stale issues/PRs |
+| `top-issues.yaml` | Tracks top issues |
+
+## Pull Request Guidelines
+
+When creating PRs, follow the template (`.github/PULL_REQUEST_TEMPLATE.md`):
+
+1. **Features**: Describe features or bug fixes
+2. **Feature Docs**: Link to RFCs or tutorials for significant updates
+3. **Influence**: Explain the impact for reviewer focus
+4. **Result**: Include screenshots or test logs
+5. **Other**: Additional notes
+
+## Public API Exports
+
+### Agents (`app/agent/__init__.py`)
+```python
+from app.agent import (
+    BaseAgent,
+    BrowserAgent,
+    MCPAgent,
+    ReActAgent,
+    SWEAgent,
+    ToolCallAgent,
+)
+```
+
+### Tools (`app/tool/__init__.py`)
+```python
+from app.tool import (
+    BaseTool,
+    Bash,
+    BrowserUseTool,
+    CreateChatCompletion,
+    Crawl4aiTool,
+    PlanningTool,
+    StrReplaceEditor,
+    Terminate,
+    ToolCollection,
+    WebSearch,
+)
+```
+
+## MCP (Model Context Protocol) Details
+
+### Running MCP Agent
+
+```bash
+# With stdio connection (default)
+python run_mcp.py
+
+# With SSE connection
+python run_mcp.py --connection sse --server-url http://localhost:8000/sse
+
+# Interactive mode
+python run_mcp.py --interactive
+
+# Single prompt
+python run_mcp.py --prompt "Your task"
+```
+
+### MCP Server Configuration
+
+Configure in `config/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "server1": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse"
+    },
+    "server2": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "my_mcp_server"]
+    }
+  }
+}
+```
+
+### Starting MCP Server
+
+```bash
+python run_mcp_server.py
+```
+
+## LLM Provider Configuration
+
+The project supports multiple LLM providers. Example configurations in `config/`:
+
+| File | Provider |
+|------|----------|
+| `config.example.toml` | Default (OpenAI-compatible) |
+| `config.example-model-anthropic.toml` | Anthropic Claude |
+| `config.example-model-azure.toml` | Azure OpenAI |
+| `config.example-model-google.toml` | Google AI |
+| `config.example-model-ollama.toml` | Ollama (local) |
+| `config.example-model-ppio.toml` | PPIO |
+| `config.example-model-jiekouai.toml` | JiekouAI |
+| `config.example-daytona.toml` | Daytona sandbox |
+
+### AWS Bedrock Configuration
+
+```toml
+[llm]
+api_type = "aws"
+model = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+base_url = "bedrock-runtime.us-west-2.amazonaws.com"
+api_key = "placeholder"  # Required but not used
+```
+
+## Agent State Machine
+
+```
+IDLE ──► RUNNING ──► FINISHED
+           │
+           ▼
+         ERROR
+```
+
+- `IDLE`: Initial state, ready to accept requests
+- `RUNNING`: Actively processing steps
+- `FINISHED`: Task completed successfully
+- `ERROR`: An error occurred during execution
+
+## Memory Management
+
+The `Memory` class (`app/schema.py`) manages conversation history:
+
+```python
+memory = Memory(max_messages=100)
+memory.add_message(Message.user_message("Hello"))
+memory.add_messages([msg1, msg2])
+recent = memory.get_recent_messages(5)
+memory.clear()
+```
+
+## Token Counting
+
+The LLM class includes token counting:
+
+```python
+llm = LLM()
+tokens = llm.count_tokens("text")
+msg_tokens = llm.count_message_tokens(messages)
+llm.update_token_count(input_tokens, completion_tokens)
+```
+
+Token limits can be configured via `max_input_tokens` in config.
+
+## Sandbox Execution
+
+Enable sandboxed execution for safer code running:
+
+```toml
+[sandbox]
+use_sandbox = true
+image = "python:3.12-slim"
+work_dir = "/workspace"
+memory_limit = "512m"
+cpu_limit = 1.0
+timeout = 300
+network_enabled = false
+```
+
+## Search Engine Configuration
+
+Configure web search behavior:
+
+```toml
+[search]
+engine = "Google"  # Primary engine
+fallback_engines = ["DuckDuckGo", "Baidu", "Bing"]
+retry_delay = 60
+max_retries = 3
+lang = "en"
+country = "us"
+```
+
 ## Notes for AI Assistants
+
+### Critical Guidelines
 
 1. **Always use async/await** for agent and tool operations
 2. **Check token limits** when making LLM calls
@@ -400,3 +609,30 @@ cp config/config.example.toml config/config.toml
 8. **Keep prompts concise** to save tokens
 9. **Handle errors gracefully** with proper logging
 10. **Use factory methods** for creating agents (e.g., `Manus.create()`)
+
+### Code Quality Checklist
+
+- [ ] Type hints on all functions
+- [ ] Async functions where appropriate
+- [ ] Pydantic models for data structures
+- [ ] Error handling with ToolResult
+- [ ] Logging with `app.logger.logger`
+- [ ] Tests for new functionality
+- [ ] Pre-commit hooks pass
+- [ ] Documentation updated
+
+### Common Pitfalls
+
+1. **Forgetting `await`**: All agent/tool methods are async
+2. **Direct instantiation of Manus**: Use `await Manus.create()` instead
+3. **Missing cleanup**: Call `agent.cleanup()` when done
+4. **Ignoring token limits**: Monitor `TokenLimitExceeded` exceptions
+5. **Hardcoded paths**: Use `config.workspace_root` and `config.root_path`
+
+### File Modification Best Practices
+
+1. **Read before editing**: Always understand existing code first
+2. **Minimal changes**: Only modify what's necessary
+3. **Preserve style**: Match existing code formatting
+4. **Update exports**: Add to `__init__.py` when creating new modules
+5. **Test thoroughly**: Ensure changes don't break existing functionality
